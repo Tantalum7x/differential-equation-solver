@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# 个人材料，不公开
+软件著作权*
+展示计划.md
+
+# Word 文档版本和旧版设计文档
+docs/*.docx
+docs/原始markdown/

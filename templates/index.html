@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>微分方程求解器（Mathematica + Python）</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+<script>
+  window.APP_CONFIG = {
+    accessTokenRequired: {{ 'true' if access_token_required else 'false' }},
+    bindHost: {{ bind_host|tojson }}
+  };
+  window.MathJax = {
+    tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] },
+    svg: { fontCache: 'global' }
+  };
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body>
+<header>
+  <h1>微分方程求解器</h1>
+  <p class="subtitle">Python · Flask · Wolfram 引擎 · MathJax</p>
+</header>
+
+<main>
+  <div class="app-layout">
+    <aside class="history-sidebar" aria-label="历史记录">
+      <div class="history-head">
+        <h2>历史记录</h2>
+        <button type="button" class="copy-btn" id="clear-history">清空</button>
+      </div>
+      <div id="history-empty" class="history-empty">暂无记录</div>
+      <div id="history-list" class="history-list"></div>
+    </aside>
+
+    <div class="workspace">
+      <form id="solve-form">
+    <fieldset id="access-token-panel" class="access-token-panel" hidden>
+      <legend>远程访问口令</legend>
+      <input name="access_token" type="password" autocomplete="current-password" placeholder="请输入主机提供的访问口令" />
+      <p class="hint">当前服务启用了访问口令。口令只保存在本浏览器，用于提交预览和求解请求。</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>输入格式</legend>
+      <label><input type="radio" name="fmt" value="wolfram" checked> Wolfram</label>
+      <label><input type="radio" name="fmt" value="latex"> LaTeX</label>
+      <label><input type="radio" name="fmt" value="auto"> 自动识别</label>
+      <p class="hint">LaTeX 模式下 <code>\frac{d^2 y}{dx^2}</code>、<code>y''(x)</code> 都可被识别为求导。PDE 偏导建议直接用 Wolfram 写法。</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>方程类型 / 求解模式</legend>
+      <label><input type="radio" name="kind" value="ode" checked> ODE</label>
+      <label><input type="radio" name="kind" value="ode_system"> ODE 组</label>
+      <label><input type="radio" name="kind" value="pde"> PDE</label>
+      &nbsp;|&nbsp;
+      <label><input type="radio" name="mode" value="analytic" checked> 解析解 (DSolve)</label>
+      <label><input type="radio" name="mode" value="numeric"> 数值解 (NDSolve)</label>
+    </fieldset>
+
+    <fieldset>
+      <legend>方程（每行一条）</legend>
+      <textarea name="equations" data-preview="eq-preview" rows="3" placeholder="y''[x] + y[x] == 0"></textarea>
+      <div id="eq-preview" class="preview-box" hidden></div>
+    </fieldset>
+
+    <div class="row">
+      <fieldset class="col">
+        <legend>未知函数</legend>
+        <input name="functions" placeholder="y" />
+      </fieldset>
+      <fieldset class="col">
+        <legend>自变量</legend>
+        <input name="variables" placeholder="x" />
+      </fieldset>
+    </div>
+
+    <fieldset>
+      <legend>初值 / 边值条件（每行一条，可空）</legend>
+      <textarea name="conditions" data-preview="cond-preview" rows="2" placeholder="y[0] == 1&#10;y'[0] == 0"></textarea>
+      <div id="cond-preview" class="preview-box" hidden></div>
+    </fieldset>
+
+    <fieldset id="parameter-panel" class="parameter-panel" hidden>
+      <legend>动态参数</legend>
+      <div id="parameter-list" class="parameter-list"></div>
+    </fieldset>
+
+    <div class="row">
+      <fieldset class="col">
+        <legend>绘图区间（数值解必填）</legend>
+        <input name="plot_range" placeholder="{x, 0, 10}" />
+      </fieldset>
+      <fieldset class="col plot-toggle">
+        <legend>绘图</legend>
+        <label><input type="checkbox" name="plot" /> 输出曲线图 / 曲面图</label>
+      </fieldset>
+    </div>
+
+    <div class="actions">
+      <button type="submit">求解</button>
+      <span id="status"></span>
+    </div>
+    <div id="form-warning" class="form-warning" hidden></div>
+      </form>
+
+      <section id="result" hidden>
+    <h2>结果</h2>
+    <div id="recognized" class="block"></div>
+    <div id="warnings" class="warnings-block" hidden>
+      <h3>提示</h3>
+      <ul id="warnings-list"></ul>
+    </div>
+    <div id="error" class="block error" hidden></div>
+    <div id="latex-block" class="block" hidden>
+      <h3>LaTeX 渲染 <button type="button" class="copy-btn" id="copy-latex">复制 LaTeX</button></h3>
+      <div id="latex-render"></div>
+      <pre id="latex-source"></pre>
+    </div>
+    <div id="image-block" class="block" hidden>
+      <h3>图像 <button type="button" class="copy-btn" id="copy-image">复制图像</button></h3>
+      <img id="plot-img" alt="solution plot" />
+    </div>
+    <div id="raw-block" class="block" hidden>
+      <h3>
+        原始 Wolfram 输出（InputForm）
+        <span class="button-row">
+          <button type="button" class="copy-btn" id="toggle-raw" hidden>展开</button>
+          <button type="button" class="copy-btn" id="copy-raw">复制 Wolfram</button>
+        </span>
+      </h3>
+      <pre id="raw-out"></pre>
+    </div>
+      </section>
+
+      <details class="examples">
+    <summary>示例（点击展开）</summary>
+    <ul>
+      <li><div><b>Wolfram ODE</b>：方程 <code>y''[x] + y[x] == 0</code>，函数 <code>y</code>，自变量 <code>x</code></div><button type="button" class="copy-btn example-apply" data-example="wolfram-ode">应用此示例</button></li>
+      <li><div><b>Wolfram 初值</b>：上式 + 条件 <code>y[0] == 1</code> 与 <code>y'[0] == 0</code></div><button type="button" class="copy-btn example-apply" data-example="wolfram-ivp">应用此示例</button></li>
+      <li><div><b>ODE 组数值解</b>：方程 <code>x'[t] == y[t]</code> / <code>y'[t] == -x[t]</code>，函数 <code>x, y</code>，自变量 <code>t</code>，条件 <code>x[0] == 1</code> / <code>y[0] == 0</code>，区间 <code>{t, 0, 2 Pi}</code>，勾选绘图</div><button type="button" class="copy-btn example-apply" data-example="ode-system">应用此示例</button></li>
+      <li><div><b>PDE 数值解</b>：方程 <code>D[u[x,t],t] == D[u[x,t],{x,2}]</code> + 边界 <code>u[x,0] == Sin[x]</code> / <code>u[0,t] == 0</code> / <code>u[Pi,t] == 0</code>，函数 <code>u</code>，自变量 <code>x, t</code>，区间 <code>{x, 0, Pi}, {t, 0, 1}</code>，勾选绘图</div><button type="button" class="copy-btn example-apply" data-example="pde-numeric">应用此示例</button></li>
+      <li><div><b>LaTeX</b>：方程 <code>\frac{d^2 y}{dx^2} + y = 0</code>，格式选 LaTeX</div><button type="button" class="copy-btn example-apply" data-example="latex-ode">应用此示例</button></li>
+    </ul>
+      </details>
+    </div>
+  </div>
+</main>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
